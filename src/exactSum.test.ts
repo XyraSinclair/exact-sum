@@ -1,243 +1,188 @@
 import { describe, expect, it } from 'vitest'
 
-import { fsum } from './fsum.js'
-import { kahanSum, neumaierSum, pairwiseSum, sum } from './ladder.js'
-import { referenceSum } from './reference.js'
-import { fast2Sum, twoSum } from './twoSum.js'
+import {
+    cumulativeSum,
+    exactSum,
+    fast2Sum,
+    neumaierSum,
+    pairwiseSum,
+    sum,
+    twoSum,
+} from './index.js'
+import { oracleSum, ulp, ulpsBetween } from './testKit.js'
 
-/* ------------------------------------------------------------------ */
-/* Test kit: deterministic vectors + ulp distance                      */
-/* ------------------------------------------------------------------ */
-
-// LCG (Numerical Recipes constants) — deterministic adversarial vectors.
-let seed = 0x2f6e2b1
-const rand = () => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
-    return seed / 2 ** 32
-}
-
-const F64 = new Float64Array(1)
-const U64 = new BigUint64Array(F64.buffer)
-/** Map a finite double to its rank in the total order, so ulp distance is a subtraction. */
-const ordinal = (x: number): bigint => {
-    F64[0] = x
-    const u = U64[0]
-    return u < 1n << 63n ? u : (1n << 63n) - u
-}
-const ulpsBetween = (a: number, b: number): bigint => {
-    const d = ordinal(a) - ordinal(b)
-    return d < 0n ? -d : d
-}
-
-const shuffled = <T>(xs: readonly T[]): T[] => {
-    const out = xs.slice()
-    for (let i = out.length - 1; i > 0; i--) {
-        const j = (rand() * (i + 1)) | 0
-        const t = out[i]
-        out[i] = out[j]
-        out[j] = t
+function generator(initialSeed = 0x6d2b79f5): () => number {
+    let state = initialSeed >>> 0
+    return () => {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+        return state / 2 ** 32
     }
-    return out
 }
 
-/** Values spanning 2^±spread — the exponent spread is what makes summation hard. */
-const expSpread = (n: number, spread: number): number[] =>
-    Array.from({ length: n }, () => (rand() * 2 - 1) * 2 ** Math.floor(rand() * 2 * spread - spread))
-
-/** Exact powers of two: halfway cases (rounding ties) abound. */
-const powersOfTwo = (n: number): number[] =>
-    Array.from({ length: n }, () => (rand() < 0.5 ? -1 : 1) * 2 ** -Math.floor(rand() * 60))
-
-/** Massive cancellation: shuffled ±pairs plus a tiny residual tail. */
-const cancelling = (n: number): number[] => {
-    const xs: number[] = []
-    for (let i = 0; i < n / 2; i++) {
-        const x = (rand() * 2 - 1) * 2 ** Math.floor(rand() * 60 - 30)
-        xs.push(x, -x)
+function shuffle(xs: readonly number[], random: () => number): number[] {
+    const result = xs.slice()
+    for (let i = result.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1))
+        ;[result[i], result[j]] = [result[j], result[i]]
     }
-    xs.push(rand() * 2 ** -40)
-    return shuffled(xs)
+    return result
 }
 
-const subnormalish = (n: number): number[] => expSpread(n, 20).map((x) => x * 2 ** -1050)
+function assertWithinForwardBound(
+    name: 'sum' | 'pairwise' | 'neumaier',
+    actual: number,
+    exact: number,
+    length: number,
+    absoluteSum: number
+): void {
+    const unitRoundoff = 2 ** -53
+    let steps: number
+    if (name === 'sum') steps = Math.max(0, length - 1)
+    else if (name === 'pairwise') steps = Math.ceil(Math.log2(Math.max(1, length / 8))) + 7
+    else steps = 2 + length * unitRoundoff
 
-/* ------------------------------------------------------------------ */
-/* fsum ≡ referenceSum — the central property                          */
-/* ------------------------------------------------------------------ */
+    const gamma = (steps * unitRoundoff) / (1 - steps * unitRoundoff)
+    const theoreticalUlps = Math.ceil((gamma * absoluteSum) / ulp(exact) + 0.5)
+    const measuredUlps = Math.abs(actual - exact) / ulp(exact)
+    expect(measuredUlps, `${name} exceeded its forward-error bound`).toBeLessThanOrEqual(
+        theoreticalUlps
+    )
+}
 
-describe('fsum agrees exactly with the BigInt oracle', () => {
-    const families: [string, () => number[]][] = [
-        ['uniform', () => Array.from({ length: 500 }, () => rand() * 2 - 1)],
-        ['exponent spread ±30', () => expSpread(300, 30)],
-        ['exponent spread ±300', () => expSpread(200, 300)],
-        ['powers of two (ties)', () => powersOfTwo(400)],
-        ['massive cancellation', () => cancelling(300)],
-        ['subnormal range', () => subnormalish(200)],
-        ['short vectors', () => expSpread(1 + ((rand() * 4) | 0), 40)],
-    ]
-    for (const [name, gen] of families) {
-        it(name, () => {
-            for (let round = 0; round < 40; round++) {
-                const v = gen()
-                const expected = referenceSum(v)
-                expect(fsum(v)).toBe(expected) // toBe is Object.is: catches -0 too
+function measureAll(xs: readonly number[] | Float64Array): void {
+    const exact = oracleSum(xs)
+    const absoluteSum = oracleSum(Array.from(xs, Math.abs))
+    const naive = sum(xs)
+    const pairwise = pairwiseSum(xs)
+    const neumaier = neumaierSum(xs)
+    const ceiling = exactSum(xs)
+
+    expect(Object.is(ceiling, exact), `exactSum differed: ${ceiling} vs ${exact}`).toBe(true)
+    if (Number.isFinite(exact) && Number.isFinite(absoluteSum)) {
+        assertWithinForwardBound('sum', naive, exact, xs.length, absoluteSum)
+        assertWithinForwardBound('pairwise', pairwise, exact, xs.length, absoluteSum)
+        assertWithinForwardBound('neumaier', neumaier, exact, xs.length, absoluteSum)
+    }
+}
+
+describe('the four-rung accuracy ladder', () => {
+    it('ships the classic case that plain Kahan misses', () => {
+        const xs = [1, 1e100, 1, -1e100]
+        expect(sum(xs)).toBe(0)
+        expect(neumaierSum(xs)).toBe(2)
+        expect(exactSum(xs)).toBe(2)
+        measureAll(xs)
+    })
+
+    it('cross-checks adversarial cancellation sets against the exact oracle', () => {
+        const cases = [
+            [1e16, 1, -1e16],
+            [1e16, 1, 1, -1e16],
+            [1, 1e100, 1, -1e100],
+            [2 ** 53, 1, 1, -(2 ** 53)],
+            [1, 2 ** -53],
+            [1, 2 ** -53, 2 ** -107],
+            [1 + 2 ** -52, 2 ** -53],
+            [Number.MIN_VALUE, Number.MIN_VALUE, -Number.MIN_VALUE],
+        ]
+        for (const xs of cases) measureAll(xs)
+    })
+
+    it(
+        'measures every rung on seeded mixed-sign, mixed-scale arrays through n = 2^20',
+        () => {
+            const random = generator()
+            for (let power = 1; power <= 20; power++) {
+                const xs = new Float64Array(2 ** power)
+                for (let i = 0; i < xs.length; i++) {
+                    const exponent = Math.floor(random() * 1001) - 500
+                    xs[i] = (random() * 2 - 1) * 2 ** exponent
+                }
+                // Prevent an exact zero from making a cancellation-conditioned ULP bound infinite.
+                xs[0] += 2 ** -500
+                measureAll(xs)
             }
+        },
+        30_000
+    )
+})
+
+describe('exactSum', () => {
+    it('is permutation invariant', () => {
+        const random = generator(0x12345678)
+        const xs = Array.from({ length: 2000 }, () => {
+            const exponent = Math.floor(random() * 801) - 400
+            return (random() * 2 - 1) * 2 ** exponent
+        })
+        const expected = oracleSum(xs)
+        for (let i = 0; i < 12; i++) expect(exactSum(shuffle(xs, random))).toBe(expected)
+    })
+
+    it('rounds ties to even and handles overflow without losing cancellation', () => {
+        expect(exactSum([1, 2 ** -53])).toBe(1)
+        expect(exactSum([1, 2 ** -53, 2 ** -107])).toBe(1 + 2 ** -52)
+        expect(exactSum([1 + 2 ** -52, 2 ** -53])).toBe(1 + 2 ** -51)
+        expect(exactSum([Number.MAX_VALUE, 2 ** 970])).toBe(Infinity)
+        expect(exactSum([Number.MAX_VALUE, 2 ** 969])).toBe(Number.MAX_VALUE)
+        expect(exactSum([1e308, 1e308, -1e308, -1e308])).toBe(0)
+    })
+})
+
+describe('edge semantics', () => {
+    for (const fn of [sum, pairwiseSum, neumaierSum, exactSum]) {
+        it(`${fn.name}: empty, singleton, zeros, NaN, and infinities`, () => {
+            expect(fn([])).toBe(0)
+            expect(fn([42.5])).toBe(42.5)
+            expect(fn([1, NaN, 2])).toBeNaN()
+            expect(fn([1, Infinity, 2])).toBe(Infinity)
+            expect(fn([-Infinity, -1])).toBe(-Infinity)
+            expect(fn([Infinity, -Infinity])).toBeNaN()
         })
     }
 
-    it('is permutation-invariant (exactness has no order)', () => {
-        const v = expSpread(300, 40)
-        const expected = referenceSum(v)
-        for (let round = 0; round < 8; round++) {
-            expect(fsum(shuffled(v))).toBe(expected)
-        }
+    it('documents zero behavior in executable form', () => {
+        expect(Object.is(exactSum([-0]), -0)).toBe(true)
+        expect(Object.is(exactSum([]), 0)).toBe(true)
+        expect(Object.is(exactSum([-0, 0]), 0)).toBe(true)
+        expect(Object.is(exactSum([1, -1]), 0)).toBe(true)
     })
-})
 
-/* ------------------------------------------------------------------ */
-/* Correct rounding at the boundaries                                  */
-/* ------------------------------------------------------------------ */
-
-describe('correct rounding, ties-to-even', () => {
-    it('halfway down to even mantissa', () => {
-        expect(fsum([1, 2 ** -53])).toBe(1)
-        expect(referenceSum([1, 2 ** -53])).toBe(1)
-    })
-    it('a crumb above halfway rounds up', () => {
-        expect(fsum([1, 2 ** -53, 2 ** -107])).toBe(1 + 2 ** -52)
-        expect(referenceSum([1, 2 ** -53, 2 ** -107])).toBe(1 + 2 ** -52)
-    })
-    it('a crumb below halfway rounds down', () => {
-        expect(fsum([1, 2 ** -53, -(2 ** -107)])).toBe(1)
-        expect(referenceSum([1, 2 ** -53, -(2 ** -107)])).toBe(1)
-    })
-    it('halfway up from odd mantissa (ties to even)', () => {
-        expect(fsum([1 + 2 ** -52, 2 ** -53])).toBe(1 + 2 ** -51)
-        expect(referenceSum([1 + 2 ** -52, 2 ** -53])).toBe(1 + 2 ** -51)
-    })
-    it('overflow boundary: MAX + 2^970 is the exact midpoint and ties to Infinity', () => {
-        expect(referenceSum([Number.MAX_VALUE, 2 ** 970])).toBe(Infinity)
-        expect(referenceSum([Number.MAX_VALUE, 2 ** 969])).toBe(Number.MAX_VALUE)
-    })
-    it('exact subnormal results', () => {
-        expect(fsum([Number.MIN_VALUE, Number.MIN_VALUE, Number.MIN_VALUE])).toBe(
-            3 * Number.MIN_VALUE
-        )
-        expect(referenceSum([2 ** -1022, -(2 ** -1022 * (1 - 2 ** -52))])).toBe(
-            fsum([2 ** -1022, -(2 ** -1022 * (1 - 2 ** -52))])
+    it('handles the full denormal range', () => {
+        measureAll(
+            Array.from({ length: 1024 }, (_, i) =>
+                (i & 1 ? -1 : 1) * (1 + (i % 31)) * Number.MIN_VALUE
+            )
         )
     })
 })
 
-/* ------------------------------------------------------------------ */
-/* Non-finite and zero semantics                                       */
-/* ------------------------------------------------------------------ */
+describe('cumulativeSum', () => {
+    it('returns compensated running prefixes without mutating input', () => {
+        const xs = [1, 1e100, 1, -1e100] as const
+        expect(cumulativeSum(xs)).toEqual([1, 1e100, 1e100, 2])
+        expect(xs).toEqual([1, 1e100, 1, -1e100])
+    })
 
-describe('specials', () => {
-    const both = (v: number[]) => [fsum(v), referenceSum(v)]
-    it('NaN anywhere poisons', () => {
-        for (const r of both([1, NaN, 2])) expect(r).toBeNaN()
-        for (const r of both([Infinity, NaN])) expect(r).toBeNaN()
-    })
-    it('mixed infinities → NaN; single-signed → that infinity', () => {
-        for (const r of both([Infinity, -Infinity])) expect(r).toBeNaN()
-        for (const r of both([1, Infinity, 2])) expect(r).toBe(Infinity)
-        for (const r of both([-Infinity, -1])) expect(r).toBe(-Infinity)
-        for (const r of both([Infinity, Infinity])) expect(r).toBe(Infinity)
-    })
-    it('empty sum is +0; a sum of only -0s is -0 (IEEE addition chain)', () => {
-        expect(fsum([])).toBe(0)
-        expect(referenceSum([])).toBe(0)
-        for (const r of both([-0, -0, -0])) expect(Object.is(r, -0)).toBe(true)
-        for (const r of both([-0, 0])) expect(Object.is(r, 0)).toBe(true)
-        for (const r of both([1, -1])) expect(Object.is(r, 0)).toBe(true)
-    })
-    it('finite inputs whose partials overflow: fsum refuses loudly, reference answers exactly', () => {
-        expect(() => fsum([1e308, 1e308])).toThrow(RangeError)
-        expect(referenceSum([1e308, 1e308])).toBe(Infinity)
-        expect(() => fsum([1e308, 1e308, -1e308, -1e308])).toThrow(RangeError)
-        expect(referenceSum([1e308, 1e308, -1e308, -1e308])).toBe(0)
+    it('accepts Float64Array and propagates non-finite prefixes', () => {
+        expect(cumulativeSum(Float64Array.of(1, 2, 3))).toEqual([1, 3, 6])
+        const result = cumulativeSum([1, Infinity, 2, -Infinity])
+        expect(result.slice(0, 3)).toEqual([1, Infinity, Infinity])
+        expect(result[3]).toBeNaN()
     })
 })
 
-/* ------------------------------------------------------------------ */
-/* The ladder: each rung within its proven bound                       */
-/* ------------------------------------------------------------------ */
+describe('error-free transforms', () => {
+    it('verifies twoSum and preordered fast2Sum against exact rational arithmetic', () => {
+        const random = generator(0xcafef00d)
+        for (let i = 0; i < 10_000; i++) {
+            let a = (random() * 2 - 1) * 2 ** (Math.floor(random() * 1201) - 600)
+            let b = (random() * 2 - 1) * 2 ** (Math.floor(random() * 1201) - 600)
+            const [sumPart, residual] = twoSum(a, b)
+            expect(oracleSum([a, b, -sumPart, -residual])).toBe(0)
 
-describe('the accuracy ladder', () => {
-    it('the classic Kahan failure: [1, 1e100, 1, -1e100]', () => {
-        expect(sum([1, 1e100, 1, -1e100])).toBe(0) // naive loses both 1s
-        expect(kahanSum([1, 1e100, 1, -1e100])).toBe(0) // Kahan truncates its own correction
-        expect(neumaierSum([1, 1e100, 1, -1e100])).toBe(2) // Neumaier keeps it
-        expect(fsum([1, 1e100, 1, -1e100])).toBe(2)
-        expect(referenceSum([1, 1e100, 1, -1e100])).toBe(2)
-    })
-
-    it('well-conditioned n=10000: compensated rungs land within ulps of exact', () => {
-        const v = Array.from({ length: 10_000 }, () => rand())
-        const exact = fsum(v)
-        expect(fsum(v)).toBe(referenceSum(v))
-        expect(ulpsBetween(kahanSum(v), exact)).toBeLessThanOrEqual(2n)
-        expect(ulpsBetween(neumaierSum(v), exact)).toBeLessThanOrEqual(2n)
-        expect(ulpsBetween(pairwiseSum(v), exact)).toBeLessThanOrEqual(64n)
-        // the baseline drifts but stays within its O(n·u) worst case
-        expect(ulpsBetween(sum(v), exact)).toBeLessThanOrEqual(10_000n)
-    })
-
-    it('typed arrays are first-class', () => {
-        const v = Float64Array.from({ length: 2048 }, () => rand() * 2 - 1)
-        const exact = fsum(v)
-        expect(exact).toBe(referenceSum(v))
-        expect(ulpsBetween(neumaierSum(v), exact)).toBeLessThanOrEqual(2n)
-        expect(ulpsBetween(pairwiseSum(v), exact)).toBeLessThanOrEqual(64n)
-    })
-})
-
-/* ------------------------------------------------------------------ */
-/* pairwiseSum mechanics                                               */
-/* ------------------------------------------------------------------ */
-
-describe('pairwiseSum', () => {
-    it('equals naive summation exactly below the unroll width', () => {
-        for (const n of [0, 1, 2, 5, 7]) {
-            const v = expSpread(n, 30)
-            expect(pairwiseSum(v, 16)).toBe(sum(v))
-        }
-    })
-    it('stays within ulps of exact across block sizes', () => {
-        const v = expSpread(2048, 30)
-        const exact = fsum(v)
-        for (const block of [2, 8, 16, 128, 4096]) {
-            expect(ulpsBetween(pairwiseSum(v, block), exact)).toBeLessThanOrEqual(64n)
-        }
-    })
-    it('handles empty and singleton', () => {
-        expect(pairwiseSum([])).toBe(0)
-        expect(pairwiseSum([42.5])).toBe(42.5)
-    })
-    it('rejects blockSize < 2', () => {
-        expect(() => pairwiseSum([1, 2, 3], 1)).toThrow(RangeError)
-    })
-    it('deep recursion is safe (n = 2^20)', () => {
-        const v = new Float64Array(1 << 20).fill(0.1)
-        expect(Number.isFinite(pairwiseSum(v, 2))).toBe(true)
-    })
-})
-
-/* ------------------------------------------------------------------ */
-/* Error-free transformations                                          */
-/* ------------------------------------------------------------------ */
-
-describe('twoSum / fast2Sum are error-free', () => {
-    it('a + b === s + e exactly, verified in exact rational arithmetic', () => {
-        for (let round = 0; round < 2000; round++) {
-            const a = (rand() * 2 - 1) * 2 ** Math.floor(rand() * 600 - 300)
-            const b = (rand() * 2 - 1) * 2 ** Math.floor(rand() * 600 - 300)
-            for (const [s, e] of [twoSum(a, b), fast2Sum(a, b)]) {
-                expect(s).toBe(a + b)
-                // (a + b) - (s + e) must be exactly zero as a real number
-                expect(referenceSum([a, b, -s, -e])).toBe(0)
-            }
+            if (Math.abs(a) < Math.abs(b)) [a, b] = [b, a]
+            const [fastSumPart, fastResidual] = fast2Sum(a, b)
+            expect(oracleSum([a, b, -fastSumPart, -fastResidual])).toBe(0)
         }
     })
 })

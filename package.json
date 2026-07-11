@@ -1,12 +1,11 @@
 {
     "name": "exact-sum",
     "version": "0.1.0",
-    "description": "The full accuracy ladder for summing floats — naive, pairwise, Kahan, Neumaier, and exact correctly-rounded fsum — zero deps, cross-validated against a BigInt rational oracle.",
+    "description": "Floating-point summation as an accuracy ladder: naive, pairwise, Neumaier compensated, and correctly rounded exact summation.",
     "keywords": [
         "sum",
         "summation",
-        "fsum",
-        "kahan",
+        "exact-sum",
         "neumaier",
         "pairwise",
         "compensated",
@@ -48,7 +47,9 @@
     },
     "devDependencies": {
         "@types/node": "^26.1.0",
+        "cyclebench": "file:../cyclebench",
         "d3-array": "^3.2.4",
+        "kahan": "^0.0.3",
         "typescript": "^5.5.0",
         "vitest": "^1.6.0"
     }
