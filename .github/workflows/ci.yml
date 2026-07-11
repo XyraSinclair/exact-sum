@@ -1,0 +1,31 @@
+name: ci
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: exact-sum
+        strategy:
+            matrix:
+                node: [22, 24]
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  path: exact-sum
+            - uses: actions/checkout@v4
+              with:
+                  repository: XyraSinclair/cyclebench
+                  path: cyclebench
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ matrix.node }}
+            # kahan@0.0.3 is benchmark-only; its obsolete jscoverage install
+            # script does not build on current Node, while its JS API does.
+            - run: npm ci --ignore-scripts
+            - run: npm test
+            - run: npm run build

@@ -8,5 +8,5 @@
         "moduleResolution": "Bundler"
     },
     "include": ["src"],
-    "exclude": ["src/*.test.ts"]
+    "exclude": ["src/*.test.ts", "src/testKit.ts"]
 }
