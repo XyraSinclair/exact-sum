@@ -24,6 +24,7 @@
  */
 export function fsum(xs: ArrayLike<number>): number {
     const partials: number[] = []
+    let pn = 0 // live expansion length; slots past pn are stale, never read
     const len = xs.length
 
     for (let i = 0; i < len; i++) {
@@ -31,21 +32,16 @@ export function fsum(xs: ArrayLike<number>): number {
         if (!Number.isFinite(x)) return nonFiniteVerdict(xs)
 
         // Fold x into the expansion: each existing partial is combined with
-        // the incoming value via Fast2Sum (swap enforces |x| >= |y|); the
-        // rounded sum keeps climbing, the exact residues are kept as the new
+        // the incoming value via branch-free 2Sum (no magnitude compare);
+        // the rounded sum keeps climbing, the exact residues become the new
         // low-order partials. Zero residues are dropped — that is what keeps
         // the list short.
         let n = 0
-        const count = partials.length
-        for (let j = 0; j < count; j++) {
-            let y = partials[j]
-            if (Math.abs(x) < Math.abs(y)) {
-                const t = x
-                x = y
-                y = t
-            }
+        for (let j = 0; j < pn; j++) {
+            const y = partials[j]
             const hi = x + y
-            const lo = y - (hi - x)
+            const yv = hi - x
+            const lo = x - (hi - yv) + (y - yv)
             if (lo !== 0) partials[n++] = lo
             x = hi
         }
@@ -54,8 +50,8 @@ export function fsum(xs: ArrayLike<number>): number {
                 'exact-sum: intermediate overflow in fsum (a running partial passed ±2^1024); referenceSum handles this exactly'
             )
         }
-        partials.length = n
-        partials.push(x)
+        partials[n] = x
+        pn = n + 1
     }
 
     // Extract the correctly-rounded total from the expansion. Partials are
@@ -63,7 +59,7 @@ export function fsum(xs: ArrayLike<number>): number {
     // is exact until the first nonzero residue `lo`; at that point `lo` is
     // less than half an ulp of `hi` — except in the exact-tie case, where
     // the sign of the next partial down decides the ties-to-even direction.
-    let n = partials.length
+    let n = pn
     if (n === 0) return 0
     let hi = partials[--n]
     let lo = 0

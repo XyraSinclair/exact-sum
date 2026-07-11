@@ -198,10 +198,17 @@ describe('the accuracy ladder', () => {
 /* ------------------------------------------------------------------ */
 
 describe('pairwiseSum', () => {
-    it('equals naive summation exactly up to one block', () => {
-        for (const n of [0, 1, 2, 15, 16]) {
+    it('equals naive summation exactly below the unroll width', () => {
+        for (const n of [0, 1, 2, 5, 7]) {
             const v = expSpread(n, 30)
             expect(pairwiseSum(v, 16)).toBe(sum(v))
+        }
+    })
+    it('stays within ulps of exact across block sizes', () => {
+        const v = expSpread(2048, 30)
+        const exact = fsum(v)
+        for (const block of [2, 8, 16, 128, 4096]) {
+            expect(ulpsBetween(pairwiseSum(v, block), exact)).toBeLessThanOrEqual(64n)
         }
     })
     it('handles empty and singleton', () => {

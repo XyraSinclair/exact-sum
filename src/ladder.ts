@@ -24,12 +24,13 @@ export function sum(xs: ArrayLike<number>): number {
 
 /**
  * Pairwise (cascade) summation: recursively halve, sum the halves, add.
- * Error grows O(log n) instead of O(n), at nearly naive speed — blocks of
- * `blockSize` at the bottom are summed naively so the recursion overhead
- * amortizes away. Recursion depth is ⌈log₂(n / blockSize)⌉ ≤ 46, so no
- * stack guard is needed at any array length.
+ * Error grows O(log n) instead of O(n) — and it is *faster* than the naive
+ * loop, because the base case runs eight independent accumulators, breaking
+ * the serial add dependency chain (see the receipts in README). Recursion
+ * depth is ⌈log₂(n / blockSize)⌉ ≤ 46, so no stack guard is needed at any
+ * array length.
  */
-export function pairwiseSum(xs: ArrayLike<number>, blockSize = 16): number {
+export function pairwiseSum(xs: ArrayLike<number>, blockSize = 128): number {
     if (blockSize < 2) throw new RangeError('exact-sum: blockSize must be >= 2')
     return pairwise(xs, 0, xs.length, blockSize)
 }
@@ -37,8 +38,31 @@ export function pairwiseSum(xs: ArrayLike<number>, blockSize = 16): number {
 function pairwise(xs: ArrayLike<number>, lo: number, hi: number, block: number): number {
     const n = hi - lo
     if (n <= block) {
-        let s = 0
-        for (let i = lo; i < hi; i++) s += xs[i]
+        // Eight independent accumulators: an in-block pairwise tree that cuts
+        // the base-case error term ~8x AND breaks the serial add dependency
+        // chain, so the block runs at full ILP — faster than a naive loop.
+        let s0 = 0
+        let s1 = 0
+        let s2 = 0
+        let s3 = 0
+        let s4 = 0
+        let s5 = 0
+        let s6 = 0
+        let s7 = 0
+        let i = lo
+        const cut = lo + (n & ~7)
+        for (; i < cut; i += 8) {
+            s0 += xs[i]
+            s1 += xs[i + 1]
+            s2 += xs[i + 2]
+            s3 += xs[i + 3]
+            s4 += xs[i + 4]
+            s5 += xs[i + 5]
+            s6 += xs[i + 6]
+            s7 += xs[i + 7]
+        }
+        let s = (s0 + s1) + (s2 + s3) + ((s4 + s5) + (s6 + s7))
+        for (; i < hi; i++) s += xs[i]
         return s
     }
     const mid = lo + (n >> 1)
