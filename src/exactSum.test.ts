@@ -140,6 +140,27 @@ describe('edge semantics', () => {
         })
     }
 
+    it('non-finite elements AFTER the overflow point still win (review R1)', () => {
+        const MAX = Number.MAX_VALUE
+        // The BigInt fallback trips mid-scan on intermediate overflow; a
+        // special value later in the array must not be decoded as a finite
+        // exponent-2047 bit pattern.
+        expect(exactSum([MAX, MAX, NaN])).toBeNaN()
+        expect(exactSum([MAX, MAX, -Infinity])).toBe(-Infinity)
+        expect(exactSum([MAX, MAX, Infinity])).toBe(Infinity)
+        expect(exactSum([1e308, 1e308, -1e308, NaN])).toBeNaN()
+        // Control: the same specials before the overflow point.
+        expect(exactSum([NaN, MAX, MAX])).toBeNaN()
+        expect(exactSum([-Infinity, MAX, MAX])).toBe(-Infinity)
+    })
+
+    it('non-numeric garbage outside the TS contract yields NaN, not an infinity (review R2)', () => {
+        const junk = (v: unknown) => exactSum(v as number[])
+        expect(junk(new Array(3))).toBeNaN()
+        expect(junk([1, undefined, 2])).toBeNaN()
+        expect(junk([Infinity, undefined])).toBeNaN()
+    })
+
     it('documents zero behavior in executable form', () => {
         expect(Object.is(exactSum([-0]), -0)).toBe(true)
         expect(Object.is(exactSum([]), 0)).toBe(true)

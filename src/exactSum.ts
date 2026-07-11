@@ -61,7 +61,10 @@ function nonFiniteSum(xs: Summable): number {
     let negativeInfinity = false
     for (let i = 0; i < xs.length; i++) {
         const x = xs[i]
-        if (Number.isNaN(x)) return NaN
+        // Non-numbers (holes, undefined — outside the TS contract) behave
+        // like the NaN that `+` would have produced, never a fabricated
+        // infinity.
+        if (typeof x !== 'number' || Number.isNaN(x)) return NaN
         if (x === Infinity) positiveInfinity = true
         else if (x === -Infinity) negativeInfinity = true
     }
@@ -71,6 +74,14 @@ function nonFiniteSum(xs: Summable): number {
 
 /** Exact binary rational accumulation, used only when expansion arithmetic overflows. */
 function finiteFallback(xs: Summable): number {
+    // The main loop's per-element finiteness check only vetted elements it
+    // had already consumed when the overflow tripped — a NaN or Infinity
+    // LATER in the array would otherwise be decoded as a finite
+    // exponent-2047 bit pattern.
+    for (let i = 0; i < xs.length; i++) {
+        if (!Number.isFinite(xs[i])) return nonFiniteSum(xs)
+    }
+
     let integer = 0n
     let exponent = 0
 

@@ -60,7 +60,7 @@ Maximum measured ULP error (lower is better):
 
 The speed curve is honest: naive is fastest; pairwise runs at roughly 40–50%
 of its rate; Neumaier is the strongest constant-memory option; exact summation
-is about 10–25× slower than naive here. d3 wins narrowly on the large exact
+is about 8–27× slower than naive here. d3 wins narrowly on the large exact
 workloads and cancellation, while this package's `exactSum` wins narrowly at
 1k. Those are measurements, not promises. The zero-error cells for Neumaier
 are properties of these inputs, not a guarantee; only the exact algorithms
