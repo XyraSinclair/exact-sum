@@ -1,0 +1,55 @@
+{
+    "name": "exact-sum",
+    "version": "0.1.0",
+    "description": "The full accuracy ladder for summing floats — naive, pairwise, Kahan, Neumaier, and exact correctly-rounded fsum — zero deps, cross-validated against a BigInt rational oracle.",
+    "keywords": [
+        "sum",
+        "summation",
+        "fsum",
+        "kahan",
+        "neumaier",
+        "pairwise",
+        "compensated",
+        "floating-point",
+        "accuracy",
+        "numerical",
+        "error-free-transformation",
+        "shewchuk"
+    ],
+    "license": "MIT",
+    "author": "Xyra Sinclair",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/XyraSinclair/exact-sum.git"
+    },
+    "type": "module",
+    "sideEffects": false,
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist",
+        "DESIGN.md"
+    ],
+    "engines": {
+        "node": ">=18"
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.build.json",
+        "test": "vitest run",
+        "bench": "BENCH=1 vitest run src/exactSum.bench.test.ts",
+        "release": "npm publish --access public",
+        "prepublishOnly": "npm run test && npm run build"
+    },
+    "devDependencies": {
+        "@types/node": "^26.1.0",
+        "d3-array": "^3.2.4",
+        "typescript": "^5.5.0",
+        "vitest": "^1.6.0"
+    }
+}
